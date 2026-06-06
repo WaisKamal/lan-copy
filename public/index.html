@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LAN File Transfer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #c9d1d9;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container { max-width: 780px; margin: 0 auto; }
+
+    h1 { font-size: 1.55rem; font-weight: 600; color: #f0f6fc; margin-bottom: 0.2rem; }
+    .subtitle { font-size: 0.86rem; color: #6e7681; margin-bottom: 1.8rem; }
+
+    /* ── Drop zone ── */
+    .drop-zone {
+      border: 2px dashed #30363d;
+      border-radius: 10px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      margin-bottom: 1.2rem;
+      user-select: none;
+    }
+    .drop-zone.dragover { border-color: #388bfd; background: rgba(56,139,253,0.06); }
+    #fileInput { display: none; }
+    .pick-btn {
+      display: inline-block;
+      padding: 0.5rem 1.4rem;
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-bottom: 0.45rem;
+    }
+    .pick-btn:hover { background: #30363d; }
+    .drop-hint { font-size: 0.8rem; color: #484f58; }
+
+    /* ── File list ── */
+    .file-list { margin-bottom: 1.2rem; }
+
+    .file-item {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+      margin-bottom: 0.5rem;
+      transition: border-color 0.2s;
+    }
+    .file-item.uploading  { border-color: #1f6feb; }
+    .file-item.paused     { border-color: #9e6a03; }
+    .file-item.resumable  { border-color: #388bfd55; }
+    .file-item.done       { border-color: #238636; }
+    .file-item.error      { border-color: #da3633; }
+
+    .file-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .file-name {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #e6edf3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-size { font-size: 0.78rem; color: #484f58; flex-shrink: 0; }
+
+    .track {
+      height: 5px;
+      background: #21262d;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 0.45rem;
+    }
+    .fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 3px;
+      background: #388bfd;
+      transition: width 0.2s linear;
+    }
+    .fill.done     { background: #3fb950; transition: none; }
+    .fill.error    { background: #f85149; transition: none; }
+    .fill.paused   { background: #d29922; transition: none; }
+    .fill.resumable { background: #388bfd; opacity: 0.35; transition: none; }
+
+    .file-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .file-status {
+      font-size: 0.75rem;
+      color: #484f58;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .file-item.uploading  .file-status { color: #58a6ff; }
+    .file-item.paused     .file-status { color: #d29922; }
+    .file-item.resumable  .file-status { color: #388bfd99; }
+    .file-item.done       .file-status { color: #3fb950; }
+    .file-item.error      .file-status { color: #f85149; }
+
+    .file-btns { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+    .btn-action, .btn-cancel {
+      padding: 0.22rem 0.65rem;
+      border-radius: 5px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      border: 1px solid;
+      transition: background 0.15s;
+    }
+    .btn-action {
+      background: #21262d;
+      border-color: #388bfd;
+      color: #58a6ff;
+    }
+    .btn-action:hover { background: #1f3a5e; }
+    .btn-cancel {
+      background: #21262d;
+      border-color: #30363d;
+      color: #6e7681;
+    }
+    .btn-cancel:hover { background: #2d1b1b; border-color: #da3633; color: #f85149; }
+
+    /* ── Actions bar ── */
+    .actions { display: flex; align-items: center; gap: 1rem; }
+
+    #uploadBtn {
+      padding: 0.58rem 1.8rem;
+      background: #238636;
+      color: #fff;
+      border: 1px solid #2ea043;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      flex-shrink: 0;
+    }
+    #uploadBtn:hover:not(:disabled) { background: #2ea043; }
+    #uploadBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .overall { font-size: 0.84rem; color: #6e7681; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>LAN File Transfer</h1>
+  <p class="subtitle">Upload files to this device over your local network</p>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" id="fileInput" multiple>
+    <label class="pick-btn" for="fileInput">Choose Files</label>
+    <p class="drop-hint">or drag and drop files here</p>
+  </div>
+
+  <div class="file-list" id="fileList"></div>
+
+  <div class="actions">
+    <button id="uploadBtn" disabled>Upload</button>
+    <span class="overall" id="overall"></span>
+  </div>
+</div>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+const CHUNK_SIZE   = 8 * 1024 * 1024; // 8 MB
+const RETRY_CAP_MS = 10000; // max backoff between retries
+const STORAGE_KEY  = 'lan-xfer-v1';
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const fileInput  = document.getElementById('fileInput');
+const dropZone   = document.getElementById('dropZone');
+const fileListEl = document.getElementById('fileList');
+const uploadBtn  = document.getElementById('uploadBtn');
+const overallEl  = document.getElementById('overall');
+
+// ── State ────────────────────────────────────────────────────────────────────
+let selectedFiles = [];
+let fileStates    = [];   // per-file state objects
+let activeXHR     = [];   // per-file active XHR (for mid-chunk abort)
+let queueRunning  = false;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtSize(b) {
+  if (b >= 1e12) return (b/1e12).toFixed(2)+' TB';
+  if (b >= 1e9)  return (b/1e9).toFixed(2)+' GB';
+  if (b >= 1e6)  return (b/1e6).toFixed(2)+' MB';
+  if (b >= 1e3)  return (b/1e3).toFixed(1)+' KB';
+  return b+' B';
+}
+function fmtSpeed(bps) {
+  if (bps >= 1e9) return (bps/1e9).toFixed(2)+' GB/s';
+  if (bps >= 1e6) return (bps/1e6).toFixed(1)+' MB/s';
+  if (bps >= 1e3) return (bps/1e3).toFixed(1)+' KB/s';
+  return Math.round(bps)+' B/s';
+}
+function fmtETA(sec) {
+  if (!isFinite(sec) || sec <= 0) return '…';
+  if (sec < 60)   return Math.round(sec)+'s';
+  if (sec < 3600) return Math.floor(sec/60)+'m '+Math.round(sec%60)+'s';
+  return Math.floor(sec/3600)+'h '+Math.floor((sec%3600)/60)+'m';
+}
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Fingerprint + localStorage ────────────────────────────────────────────────
+function fp(file) { return `${file.name}:${file.size}:${file.lastModified}`; }
+
+function loadSaved() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+  catch { return {}; }
+}
+function saveProgress(file, data) {
+  const all = loadSaved(); all[fp(file)] = data;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+function clearProgress(file) {
+  const all = loadSaved(); delete all[fp(file)];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+}
+
+// ── Speed tracker ──────────────────────────────────────────────────────────────
+function makeSpeedTracker() {
+  const samples = [];
+  return {
+    record(bytes) {
+      const now = Date.now();
+      samples.push({ t: now, b: bytes });
+      while (samples.length > 1 && now - samples[0].t > 5000) samples.shift();
+    },
+    get() {
+      if (samples.length < 2) return 0;
+      const dt = (samples[samples.length-1].t - samples[0].t) / 1000;
+      return dt < 0.05 ? 0 : (samples[samples.length-1].b - samples[0].b) / dt;
+    }
+  };
+}
+
+// ── UI helpers ──────────────────────────────────────────────────────────────────
+function itemEl(i)   { return document.getElementById('item-'+i); }
+function fillEl(i)   { return document.getElementById('fill-'+i); }
+function stEl(i)     { return document.getElementById('st-'+i); }
+function pauseEl(i)  { return document.getElementById('pause-'+i); }
+function cancelEl(i) { return document.getElementById('cancel-'+i); }
+
+function setItemCls(i, cls) {
+  const el = itemEl(i);
+  if (el) el.className = 'file-item ' + cls;
+}
+
+function setFillCls(i, cls) {
+  const el = fillEl(i);
+  if (!el) return;
+  el.className = 'fill' + (cls ? ' '+cls : '');
+}
+
+function syncButtons(i) {
+  const s    = fileStates[i];
+  const pb   = pauseEl(i);
+  const cb   = cancelEl(i);
+  if (!pb || !cb) return;
+  const active = ['uploading','paused','error','resumable'].includes(s.status);
+  cb.style.display = active ? '' : 'none';
+  if (s.status === 'uploading') { pb.textContent = 'Pause';  pb.style.display = ''; }
+  else if (s.status === 'paused')    { pb.textContent = 'Resume'; pb.style.display = ''; }
+  else if (s.status === 'error')     { pb.textContent = 'Retry';  pb.style.display = ''; }
+  else if (s.status === 'resumable') { pb.textContent = 'Skip';   pb.style.display = ''; }
+  else                               { pb.style.display = 'none'; }
+}
+
+// ── File selection & render ────────────────────────────────────────────────────
+function setFiles(files) {
+  selectedFiles = files.filter(f => f.type !== '' || f.size > 0);
+  const saved   = loadSaved();
+
+  fileStates = selectedFiles.map((f, i) => {
+    const s = saved[fp(f)];
+    return {
+      status:          s ? 'resumable' : 'waiting',
+      uploadId:        s?.uploadId   ?? null,
+      savedNextChunk:  s?.nextChunk  ?? 0,
+      totalChunks:     s?.totalChunks ?? 0,
+      pauseRequested:  false,
+      cancelRequested: false,
+      speed:           makeSpeedTracker()
+    };
+  });
+  activeXHR = selectedFiles.map(() => null);
+
+  renderFiles();
+  uploadBtn.disabled  = selectedFiles.length === 0 || queueRunning;
+  uploadBtn.textContent = 'Upload';
+  overallEl.textContent = selectedFiles.length
+    ? selectedFiles.length+' file'+(selectedFiles.length>1?'s':'')+' selected'
+    : '';
+}
+
+function renderFiles() {
+  fileListEl.innerHTML = '';
+  selectedFiles.forEach((f, i) => {
+    const s     = fileStates[i];
+    const pct   = s.status === 'resumable' && s.totalChunks > 0
+      ? (s.savedNextChunk / s.totalChunks * 100) : 0;
+    const label = s.status === 'resumable'
+      ? `Resumable — ${pct.toFixed(0)}% already received by server`
+      : 'Waiting';
+    const fillCls = s.status === 'resumable' ? 'resumable' : '';
+    const active  = ['resumable'].includes(s.status);
+
+    const el = document.createElement('div');
+    el.id        = 'item-'+i;
+    el.className = 'file-item '+s.status;
+    el.innerHTML =
+      `<div class="file-header">
+        <span class="file-name" title="${esc(f.name)}">${esc(f.name)}</span>
+        <span class="file-size">${fmtSize(f.size)}</span>
+      </div>
+      <div class="track"><div class="fill ${fillCls}" id="fill-${i}" style="width:${pct.toFixed(1)}%"></div></div>
+      <div class="file-footer">
+        <span class="file-status" id="st-${i}">${label}</span>
+        <span class="file-btns">
+          <button class="btn-action" id="pause-${i}"
+            style="display:${active?'':'none'}"
+            onclick="onPauseBtn(${i})">${s.status==='resumable'?'Skip':'Pause'}</button>
+          <button class="btn-cancel" id="cancel-${i}"
+            style="display:${active?'':'none'}"
+            onclick="onCancelBtn(${i})">Cancel</button>
+        </span>
+      </div>`;
+    fileListEl.appendChild(el);
+  });
+}
+
+// ── Button handlers ────────────────────────────────────────────────────────────
+function onPauseBtn(i) {
+  const s = fileStates[i];
+  if (s.status === 'uploading') {
+    s.pauseRequested = true;
+    // UI updates happen in the loop when it detects the flag
+  } else if (s.status === 'paused') {
+    s.pauseRequested = false;
+    // loop will wake up and continue
+  } else if (s.status === 'error') {
+    // Retry: restart queue from this file
+    s.status = 'waiting';
+    s.pauseRequested  = false;
+    s.cancelRequested = false;
+    setItemCls(i, 'waiting');
+    setFillCls(i, '');
+    stEl(i).textContent = 'Waiting…';
+    syncButtons(i);
+    if (!queueRunning) startQueue(i);
+  } else if (s.status === 'resumable') {
+    // Skip: discard saved state for this file
+    clearProgress(selectedFiles[i]);
+    s.status         = 'waiting';
+    s.uploadId       = null;
+    s.savedNextChunk = 0;
+    s.totalChunks    = 0;
+    setItemCls(i, 'waiting');
+    fillEl(i).style.width = '0%';
+    setFillCls(i, '');
+    stEl(i).textContent = 'Waiting (skipped resume)';
+    syncButtons(i);
+  }
+}
+
+function onCancelBtn(i) {
+  const s = fileStates[i];
+  if (s.status === 'uploading' || s.status === 'paused') {
+    s.cancelRequested = true;
+    s.pauseRequested  = false; // unblock if paused
+    if (activeXHR[i]) { activeXHR[i].abort(); activeXHR[i] = null; }
+  } else if (s.status === 'resumable' || s.status === 'error') {
+    // Discard server-side partial upload
+    const uid = s.uploadId;
+    if (uid) fetch('/upload/'+uid, { method: 'DELETE' }).catch(()=>{});
+    clearProgress(selectedFiles[i]);
+    s.status         = 'waiting';
+    s.uploadId       = null;
+    s.savedNextChunk = 0;
+    s.totalChunks    = 0;
+    setItemCls(i, 'waiting');
+    fillEl(i).style.width = '0%';
+    setFillCls(i, '');
+    stEl(i).textContent = 'Cancelled';
+    syncButtons(i);
+  }
+}
+
+// ── Core: upload a single chunk via XHR ───────────────────────────────────────
+function sendChunk(file, i, chunkIdx, uploadId) {
+  return new Promise((resolve, reject) => {
+    const start = chunkIdx * CHUNK_SIZE;
+    const end   = Math.min(start + CHUNK_SIZE, file.size);
+    const blob  = file.slice(start, end);
+    const fd    = new FormData();
+    fd.append('uploadId',   uploadId);
+    fd.append('chunkIndex', chunkIdx);
+    fd.append('chunk',      blob, file.name);
+
+    const xhr = new XMLHttpRequest();
+    activeXHR[i] = xhr;
+
+    xhr.upload.addEventListener('progress', e => {
+      if (!e.lengthComputable) return;
+      const overall = chunkIdx * CHUNK_SIZE + e.loaded;
+      updateProgress(i, overall, file.size);
+    });
+
+    xhr.addEventListener('load', () => {
+      activeXHR[i] = null;
+      if (xhr.status === 200) {
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch { reject(new Error('Bad server response')); }
+      } else {
+        let code, msg = `Server ${xhr.status}`;
+        try { const j = JSON.parse(xhr.responseText); msg = j.error || msg; code = j.code; } catch {}
+        const e = new Error(msg); e.code = code;
+        reject(e);
+      }
+    });
+    xhr.addEventListener('error', () => { activeXHR[i] = null; reject(new Error('Network error')); });
+    xhr.addEventListener('abort', () => { activeXHR[i] = null; reject(new Error('Aborted')); });
+
+    xhr.open('POST', '/upload/chunk');
+    xhr.send(fd);
+  });
+}
+
+// ── Progress display ──────────────────────────────────────────────────────────
+function updateProgress(i, loaded, total) {
+  const s = fileStates[i];
+  s.speed.record(loaded);
+  const pct   = total > 0 ? loaded / total * 100 : 0;
+  const fill  = fillEl(i);
+  if (fill) fill.style.width = pct.toFixed(1)+'%';
+
+  const spd = s.speed.get();
+  const eta = spd > 0 ? (total - loaded) / spd : Infinity;
+  const txt =
+    pct.toFixed(1)+'%  •  '+fmtSize(loaded)+' / '+fmtSize(total)+
+    (spd > 0 ? '  •  '+fmtSpeed(spd)+'  •  ETA '+fmtETA(eta) : '');
+  const st = stEl(i);
+  if (st) st.textContent = txt;
+}
+
+// ── Core: upload one file ──────────────────────────────────────────────────────
+async function uploadOneFile(file, i) {
+  const s  = fileStates[i];
+  const f  = file;
+
+  // ── 1. Init / resume session ──
+  let uploadId, receivedChunks;
+  try {
+    const totalChunks = Math.ceil(f.size / CHUNK_SIZE) || 1;
+    const resp = await fetch('/upload/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uploadId:    s.uploadId,
+        filename:    f.name,
+        fileSize:    f.size,
+        chunkSize:   CHUNK_SIZE,
+        totalChunks
+      })
+    });
+    if (!resp.ok) throw new Error('Init failed');
+    ({ uploadId, receivedChunks } = await resp.json());
+  } catch {
+    return 'error';
+  }
+
+  s.uploadId = uploadId;
+  const totalChunks = Math.ceil(f.size / CHUNK_SIZE) || 1;
+
+  // Find first chunk not yet received
+  const received   = new Set(receivedChunks);
+  let startChunk   = 0;
+  while (received.has(startChunk) && startChunk < totalChunks) startChunk++;
+
+  // Show prior progress immediately if resuming
+  if (startChunk > 0) {
+    const bytes = Math.min(startChunk * CHUNK_SIZE, f.size);
+    fillEl(i).style.width = (bytes / f.size * 100).toFixed(1)+'%';
+    stEl(i).textContent   = `Resuming from ${fmtSize(bytes)}…`;
+  }
+
+  saveProgress(f, { uploadId, nextChunk: startChunk, totalChunks });
+
+  // ── 2. Chunk loop ──
+  for (let ci = startChunk; ci < totalChunks; ci++) {
+
+    // ── Pause gate ──
+    if (s.pauseRequested) {
+      s.status = 'paused';
+      setItemCls(i, 'paused');
+      setFillCls(i, 'paused');
+      stEl(i).textContent = 'Paused at '+(ci * CHUNK_SIZE / f.size * 100).toFixed(1)+'%';
+      syncButtons(i);
+      while (s.pauseRequested && !s.cancelRequested) await sleep(80);
+      if (!s.cancelRequested) {
+        s.status = 'uploading';
+        setItemCls(i, 'uploading');
+        setFillCls(i, '');
+        syncButtons(i);
+      }
+    }
+
+    // ── Cancel gate ──
+    if (s.cancelRequested) {
+      saveProgress(f, { uploadId, nextChunk: ci, totalChunks });
+      fetch('/upload/'+uploadId, { method: 'DELETE' }).catch(()=>{});
+      clearProgress(f);
+      return 'cancelled';
+    }
+
+    // ── Send chunk (retry indefinitely with capped backoff) ──
+    let result;
+    let attempt = 0;
+    while (true) {
+      try {
+        result = await sendChunk(f, i, ci, uploadId);
+        break;
+      } catch (err) {
+        if (err.message === 'Aborted' || s.cancelRequested) {
+          saveProgress(f, { uploadId, nextChunk: ci, totalChunks });
+          return 'cancelled';
+        }
+        if (err.code === 'SESSION_NOT_FOUND') {
+          // Server restarted — re-init and retry from ci
+          saveProgress(f, { uploadId: null, nextChunk: ci, totalChunks });
+          return await uploadOneFile(f, i);
+        }
+        attempt++;
+        const delay = Math.min(800 * attempt, RETRY_CAP_MS);
+        stEl(i).textContent = `Retry ${attempt} for chunk ${ci+1} — waiting ${(delay/1000).toFixed(0)}s…`;
+        await sleep(delay);
+      }
+    }
+
+    // ── Update progress save ──
+    saveProgress(f, { uploadId, nextChunk: ci + 1, totalChunks });
+
+    if (result.complete) {
+      clearProgress(f);
+      return 'done';
+    }
+  }
+
+  clearProgress(f);
+  return 'done';
+}
+
+// ── Queue runner ───────────────────────────────────────────────────────────────
+async function startQueue(fromIndex = 0) {
+  if (queueRunning) return;
+  queueRunning = true;
+  uploadBtn.disabled = true;
+
+  let firstPending = fromIndex;
+  // Skip already-done files before fromIndex
+  while (firstPending < selectedFiles.length &&
+         ['done','cancelled'].includes(fileStates[firstPending].status)) {
+    firstPending++;
+  }
+
+  for (let i = firstPending; i < selectedFiles.length; i++) {
+    const s = fileStates[i];
+    if (s.status === 'done' || s.status === 'cancelled') continue;
+
+    s.status          = 'uploading';
+    s.pauseRequested  = false;
+    s.cancelRequested = false;
+    s.speed           = makeSpeedTracker();
+    setItemCls(i, 'uploading');
+    setFillCls(i, '');
+    stEl(i).textContent = 'Starting…';
+    syncButtons(i);
+    overallEl.textContent = `File ${i+1} of ${selectedFiles.length}…`;
+
+    const outcome = await uploadOneFile(selectedFiles[i], i);
+
+    if (outcome === 'done') {
+      s.status = 'done';
+      setItemCls(i, 'done');
+      setFillCls(i, 'done');
+      fillEl(i).style.width = '100%';
+      stEl(i).textContent   = 'Done  •  '+fmtSize(selectedFiles[i].size);
+      syncButtons(i);
+    } else if (outcome === 'error') {
+      s.status = 'error';
+      setItemCls(i, 'error');
+      setFillCls(i, 'error');
+      stEl(i).textContent = 'Failed — click Retry to resume from where it stopped';
+      syncButtons(i);
+      overallEl.textContent = 'Upload stopped due to error.';
+      break; // stop queue; user must retry
+    } else if (outcome === 'cancelled') {
+      s.status = 'waiting'; // cancelled = skip this file, not a hard stop
+      setItemCls(i, '');
+      setFillCls(i, '');
+      fillEl(i).style.width = '0%';
+      stEl(i).textContent = 'Skipped';
+      syncButtons(i);
+      // Continue to next file
+    }
+  }
+
+  queueRunning = false;
+  uploadBtn.disabled = false;
+
+  const done      = fileStates.filter(s => s.status === 'done').length;
+  const remaining = fileStates.filter(s => !['done','cancelled'].includes(s.status)).length;
+
+  if (remaining === 0 && done > 0) {
+    overallEl.textContent  = `All ${done} file${done>1?'s':''} uploaded.`;
+    uploadBtn.textContent  = 'Upload More';
+  } else if (remaining > 0) {
+    uploadBtn.textContent  = 'Resume Queue';
+    if (!overallEl.textContent.includes('error')) {
+      overallEl.textContent = `${done} done, ${remaining} remaining.`;
+    }
+  }
+}
+
+// ── Top-level Upload button ────────────────────────────────────────────────────
+uploadBtn.addEventListener('click', () => {
+  if (queueRunning) return;
+  // Find first non-done file
+  const start = fileStates.findIndex(s => !['done','cancelled'].includes(s.status));
+  if (start === -1) {
+    overallEl.textContent = 'All files already uploaded.';
+    return;
+  }
+  startQueue(start);
+});
+
+// ── File picker ─────────────────────────────────────────────────────────────────
+fileInput.addEventListener('change', () => {
+  setFiles(Array.from(fileInput.files));
+});
+
+// ── Drag and drop (folders excluded via webkitGetAsEntry) ──────────────────────
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault(); dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', e => {
+  if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('dragover');
+});
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('dragover');
+  const items = Array.from(e.dataTransfer.items || []);
+  Promise.all(items.map(item => new Promise(resolve => {
+    const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+    resolve(entry && entry.isFile ? item.getAsFile() : (!entry ? item.getAsFile() : null));
+  }))).then(files => setFiles(files.filter(Boolean)));
+});
+</script>
+</body>
+</html>
