@@ -26,8 +26,7 @@ function getLocalIPs() {
 }
 
 function safeName(raw) {
-  return Buffer.from(String(raw), 'latin1')
-    .toString('utf8')
+  return String(raw)
     .replace(/[/\\:*?"<>|]/g, '_')
     .replace(/\0/g, '')
     .trim() || 'upload';
