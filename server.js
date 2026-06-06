@@ -33,6 +33,16 @@ function safeName(raw) {
     .trim() || 'upload';
 }
 
+// Sanitize a relative path from the client: strip '..' components, sanitize each segment.
+// Returns an OS-native relative path (e.g. "Movies\\Action\\film.mkv" on Windows).
+function sanitizeRelPath(raw) {
+  const parts = String(raw)
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(p => p && p !== '.' && p !== '..');
+  return parts.map(safeName).join(path.sep);
+}
+
 function uniquePath(dir, name) {
   let dest = path.join(dir, name);
   if (!fs.existsSync(dest)) return dest;
@@ -54,8 +64,14 @@ app.use(express.json());
 // ── Initialize or resume an upload session ─────────────────────────────────
 
 app.post('/upload/init', (req, res) => {
-  let { uploadId, filename, fileSize, chunkSize, totalChunks } = req.body;
-  filename = safeName(filename);
+  let { uploadId, filename, relativePath, fileSize, chunkSize, totalChunks } = req.body;
+
+  // savePath is the relative path under UPLOAD_DIR where the file will be written.
+  // CLI uploads supply relativePath (preserves folder structure).
+  // Browser uploads supply only filename (flat save with collision avoidance).
+  const savePath = relativePath
+    ? sanitizeRelPath(relativePath)
+    : safeName(filename);
 
   // Resume existing session
   if (uploadId && isValidUUID(uploadId)) {
@@ -63,7 +79,7 @@ app.post('/upload/init', (req, res) => {
     const partialPath = path.join(TMP_DIR, `${uploadId}.partial`);
     if (fs.existsSync(metaPath) && fs.existsSync(partialPath)) {
       const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-      console.log(`Resume: ${meta.filename} (${meta.receivedChunks.length}/${meta.totalChunks} chunks)`);
+      console.log(`Resume: ${meta.savePath} (${meta.receivedChunks.length}/${meta.totalChunks} chunks)`);
       return res.json({ uploadId, receivedChunks: meta.receivedChunks });
     }
   }
@@ -71,7 +87,7 @@ app.post('/upload/init', (req, res) => {
   // New session
   uploadId = crypto.randomUUID();
   const meta = {
-    filename,
+    savePath,
     fileSize: Number(fileSize),
     chunkSize: Number(chunkSize),
     totalChunks: Number(totalChunks),
@@ -79,7 +95,7 @@ app.post('/upload/init', (req, res) => {
   };
   fs.writeFileSync(path.join(TMP_DIR, `${uploadId}.json`), JSON.stringify(meta));
   fs.closeSync(fs.openSync(path.join(TMP_DIR, `${uploadId}.partial`), 'w'));
-  console.log(`New: ${filename} (${(meta.fileSize / 1e9).toFixed(2)} GB, ${totalChunks} chunks)`);
+  console.log(`New: ${savePath} (${(meta.fileSize / 1e9).toFixed(2)} GB, ${totalChunks} chunks)`);
   res.json({ uploadId, receivedChunks: [] });
 });
 
@@ -123,11 +139,22 @@ app.post('/upload/chunk', (req, res) => {
     }
 
     if (meta.receivedChunks.length === meta.totalChunks) {
-      const finalPath = uniquePath(UPLOAD_DIR, meta.filename);
+      // Determine final destination.
+      // CLI uploads (savePath has subdirs) use the exact path — preserves folder structure.
+      // Browser uploads (savePath is a bare filename) use uniquePath to avoid overwriting.
+      let finalPath;
+      if (path.dirname(meta.savePath) === '.') {
+        finalPath = uniquePath(UPLOAD_DIR, meta.savePath);
+      } else {
+        const destDir = path.join(UPLOAD_DIR, path.dirname(meta.savePath));
+        fs.mkdirSync(destDir, { recursive: true });
+        finalPath = path.join(UPLOAD_DIR, meta.savePath);
+      }
       fs.renameSync(partialPath, finalPath);
       fs.unlinkSync(metaPath);
-      console.log(`Done: ${path.basename(finalPath)} (${(meta.fileSize / 1e9).toFixed(3)} GB)`);
-      return res.json({ received: idx, complete: true, filename: path.basename(finalPath) });
+      const relResult = path.relative(UPLOAD_DIR, finalPath);
+      console.log(`Done: ${relResult} (${(meta.fileSize / 1e9).toFixed(3)} GB)`);
+      return res.json({ received: idx, complete: true, filename: relResult });
     }
 
     fs.writeFileSync(metaPath, JSON.stringify(meta));
